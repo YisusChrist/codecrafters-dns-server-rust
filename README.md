@@ -20,6 +20,10 @@ various record types (A, AAAA, CNAME, etc) and more.
   - [Stage 1: Setup UDP server](#stage-1-setup-udp-server)
   - [Stage 2: Write header section](#stage-2-write-header-section)
     - [Header section structure](#header-section-structure)
+    - [Rust Guide (Beta)](#rust-guide-beta)
+  - [Stage 3: Write question section](#stage-3-write-question-section)
+    - [Question section structure](#question-section-structure)
+    - [Domain name encoding](#domain-name-encoding)
 
 # Introduction
 
@@ -127,3 +131,98 @@ Just like in the previous stage, the tester will execute your program like this:
 It'll then send a UDP packet (containing a DNS query) to port 2053. Your program will need to respond with a DNS reply packet that contains the header information described above.
 
 We recommend creating an internal structure for a "DNS message" in your code, as we will build on this in later stages.
+
+---
+
+### Rust Guide (Beta)
+
+In this stage, you'll work on creating the header section of a DNS packet. The DNS packet's header contains various flags and counts which need to be configured as per the requirements given.
+
+One effective approach to storing and manipulating the DNS packet header fields is to first define a struct that represents the header format. Here's an example struct:
+
+```rust
+pub struct DNSHeader {
+    id: u16,
+    qr: u8,
+    opcode:u8,
+    aa: u8,
+    tc: u8,
+    rd: u8,
+    ra: u8,
+    z: u8,
+    rcode: u8,
+    qdcount: u16,
+    ancount: u16,
+    nscount: u16,
+    arcount: u16,
+}
+```
+
+The integer types ([u8](https://doc.rust-lang.org/std/primitive.u8.html), [u16](https://doc.rust-lang.org/std/primitive.u16.html), etc) indicate the size of each field. Observe that we've done the conversion from bits to bytes. To store bit fields like "Query/Response Indicator (QR)" which range in size from 1 to 4 bits, you can use the [u8](https://doc.rust-lang.org/std/primitive.u8.html) integer type.
+
+To write this information into a binary format, Rust provides conversion functions like [to_be_bytes()](https://doc.rust-lang.org/std/primitive.u16.html#method.to_be_bytes) that will output a big-endian array. You can write these bytes to a byte buffer:
+
+```rust
+let id_bytes = header.id.to_be_bytes();
+buffer.extend_from_slice(&id_bytes);
+```
+
+Do note that DNS packet uses a big-endian format, so you will utilize the above-mentioned function to make sure the output is converted into the right format.
+
+Lastly, pay attention to the fact that some of the fields in the header are not a full byte, but rather take up a bit within a byte. This can be handled by using bitwise operations in Rust.
+
+For instance, you might take `qr`, `opcode`, and `aa` and pack them into a single byte:
+
+```rust
+let byte1 = (header.qr << 7) | (header.opcode << 3) | (header.aa);
+```
+
+This forms the basis of the task. Continue in a similar fashion to serialize the rest of the header fields into the byte buffer. If you feel that you need more help, feel free to look at "Code Examples" for additional guidance. Remember, this is a process of learning and experimentation.
+
+## Stage 3: Write question section
+
+In this stage, you'll extend your DNS server to respond with the "question" section, the second section of a DNS message.
+
+### Question section structure
+
+The question section contains a list of questions (usually just 1) that the sender wants to ask the receiver. This section is present in both query and reply packets.
+
+Each question has the following structure:
+
+- **Name**: A domain name, represented as a sequence of "labels" (more on this below)
+- **Type**: 2-byte int; the type of record (1 for an A record, 5 for a CNAME record etc., full list [here](https://www.rfc-editor.org/rfc/rfc1035#section-3.2.2))
+- **Class**: 2-byte int; usually set to 1 (full list [here](https://www.rfc-editor.org/rfc/rfc1035#section-3.2.4))
+
+[Section 4.1.2](https://www.rfc-editor.org/rfc/rfc1035#section-4.1.2) of the RFC covers the question section format in detail. [Section 3.2](https://www.rfc-editor.org/rfc/rfc1035#section-3.2) has more details on Type and class.
+
+### Domain name encoding
+
+Domain names in DNS packets are encoded as a sequence of labels.
+
+Labels are encoded as `<length><content>`, where `<length>` is a single byte that specifies the length of the label, and `<content>` is the actual content of the label. The sequence of labels is terminated by a null byte (`\x00`).
+
+For example:
+
+- `google.com` is encoded as `\x06google\x03com\x00` (in hex: `06 67 6f 6f 67 6c 65 03 63 6f 6d 00`)
+  - `\x06google` is the first label
+    - `\x06` is a single byte, which is the length of the label
+    - `google` is the content of the label
+  - `\x03com` is the second label
+    - `\x03` is a single byte, which is the length of the label
+    - `com` is the content of the label
+  - `\x00` is the null byte that terminates the domain name
+
+---
+
+Just like in the previous stage, the tester will execute your program like this:
+
+./your_server.sh
+It'll then send a UDP packet (containing a DNS query) to port 2053. Your program will need to respond with a DNS reply packet that contains the question section described above (along with the header section from the previous stage).
+
+Here are the expected values for the question section:
+
+Field Expected value
+Name \x0ccodecrafters\x02io followed by a null byte (that's codecrafters.io encoded as a label sequence)
+Type 1 encoded as a 2-byte big-endian int (corresponding to the "A" record type)
+Class 1 encoded as a 2-byte big-endian int (corresponding to the "IN" record class)
+Make sure to update the QDCOUNT field in the header section accordingly, and remember to set the id to 1234.
