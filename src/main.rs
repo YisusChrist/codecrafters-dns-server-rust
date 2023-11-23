@@ -71,7 +71,7 @@ impl DNSQuestion {
 
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        for label in self.domain_name.as_slice() {
+        for label in &self.domain_name {
             bytes.push(label.len() as u8);
             bytes.extend_from_slice(label.as_bytes());
         }
