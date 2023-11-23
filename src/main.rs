@@ -84,7 +84,7 @@ impl DNSQuestion {
 
 struct ResourceRecord {
     name: Vec<u8>,
-    r#type: u16,
+    rtype: u16,
     class: u16,
     ttl: u32,
     rdlength: u16,
@@ -95,7 +95,7 @@ impl ResourceRecord {
     fn new() -> ResourceRecord {
         ResourceRecord {
             name: Vec::new(), // This will be updated later
-            r#type: 1,        // A record type
+            rtype: 1,        // A record type
             class: 1,         // IN record class
             ttl: 60,          // TTL can be any value
             rdlength: 4,      // Length of the IPv4 address
@@ -106,7 +106,7 @@ impl ResourceRecord {
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&self.name);
-        bytes.extend_from_slice(&self.r#type.to_be_bytes());
+        bytes.extend_from_slice(&self.rtype.to_be_bytes());
         bytes.extend_from_slice(&self.class.to_be_bytes());
         bytes.extend_from_slice(&self.ttl.to_be_bytes());
         bytes.extend_from_slice(&self.rdlength.to_be_bytes());
