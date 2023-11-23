@@ -1,4 +1,3 @@
-// Uncomment this block to pass the first stage
 use std::net::UdpSocket;
 
 // Connect to DNS server on http://127.0.0.1:2053
@@ -55,11 +54,39 @@ impl DnsHeader {
     }
 }
 
+struct EncodedLabel(Vec<u8>);
+
+impl From<&str> for EncodedLabel {
+    fn from(domain: &str) -> Self {
+        let mut bytes = Vec::new();
+        for label in domain.split('.') {
+            bytes.push(label.len() as u8);
+            bytes.extend_from_slice(label.as_bytes());
+        }
+        bytes.push(0); // Null terminator
+        EncodedLabel(bytes)
+    }
+}
+
+struct DNSQuestion {
+    domain_name: EncodedLabel,
+    query_type: u16,
+    query_class: u16,
+}
+
+impl DNSQuestion {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.domain_name.0);
+        bytes.extend_from_slice(&self.query_type.to_be_bytes());
+        bytes.extend_from_slice(&self.query_class.to_be_bytes());
+        bytes
+    }
+}
+
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
-    // Uncomment this block to pass the first stage
     let udp_socket = UdpSocket::bind(format!("{}:{}", SERVER_ADDRESS, SERVER_PORT))
         .expect("Failed to bind to address");
     let mut buf = [0; 512];
@@ -71,7 +98,14 @@ fn main() {
                 println!("Received {} bytes from {}", size, source);
 
                 let dns_header = DnsHeader::new();
-                let response = dns_header.to_bytes();
+                let dns_question = DNSQuestion {
+                    domain_name: "codecrafters.io".into(),
+                    query_type: 1,  // A record type
+                    query_class: 1, // IN record class
+                };
+
+                let mut response = dns_header.to_bytes();
+                response.extend_from_slice(&dns_question.to_bytes());
 
                 udp_socket
                     .send_to(&response, source)
