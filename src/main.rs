@@ -1,4 +1,4 @@
-use std::net::UdpSocket;
+use std::net::{Ipv4Addr, UdpSocket};
 
 // Connect to DNS server on http://127.0.0.1:2053
 
@@ -34,8 +34,8 @@ impl DnsHeader {
             ra: 0,
             z: 0,
             rcode: 0,
-            qdcount: 1,
-            ancount: 0,
+            qdcount: 1, // Updated QDCOUNT for the question section
+            ancount: 1, // Updated ANCOUNT for the answer section
             nscount: 0,
             arcount: 0,
         }
@@ -68,6 +68,7 @@ impl DNSQuestion {
             query_class: 1, // IN record class
         }
     }
+
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         for label in self.domain_name.as_slice() {
@@ -79,6 +80,43 @@ impl DNSQuestion {
         bytes.extend_from_slice(&self.query_class.to_be_bytes());
         bytes
     }
+}
+
+struct ResourceRecord {
+    name: Vec<u8>,
+    r#type: u16,
+    class: u16,
+    ttl: u32,
+    rdlength: u16,
+    rdata: Vec<u8>,
+}
+
+impl ResourceRecord {
+    fn new() -> ResourceRecord {
+        ResourceRecord {
+            name: Vec::new(), // This will be updated later
+            r#type: 1,        // A record type
+            class: 1,         // IN record class
+            ttl: 60,          // TTL can be any value
+            rdlength: 4,      // Length of the IPv4 address
+            rdata: ipv4_to_bytes(Ipv4Addr::new(8, 8, 8, 8)),
+        }
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.name);
+        bytes.extend_from_slice(&self.r#type.to_be_bytes());
+        bytes.extend_from_slice(&self.class.to_be_bytes());
+        bytes.extend_from_slice(&self.ttl.to_be_bytes());
+        bytes.extend_from_slice(&self.rdlength.to_be_bytes());
+        bytes.extend_from_slice(&self.rdata);
+        bytes
+    }
+}
+
+fn ipv4_to_bytes(ip: Ipv4Addr) -> Vec<u8> {
+    ip.octets().to_vec()
 }
 
 fn main() {
@@ -96,9 +134,11 @@ fn main() {
 
                 let dns_header = DnsHeader::new();
                 let dns_question = DNSQuestion::new();
+                let resource_record = ResourceRecord::new();
 
                 let mut response = dns_header.to_bytes();
                 response.extend_from_slice(&dns_question.to_bytes());
+                response.extend_from_slice(&resource_record.to_bytes());
 
                 udp_socket
                     .send_to(&response, source)
