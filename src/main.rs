@@ -1,4 +1,4 @@
-use std::net::UdpSocket;
+use std::net::{UdpSocket, Ipv4Addr};
 
 // Connect to DNS server on http://127.0.0.1:2053
 
@@ -99,7 +99,7 @@ impl ResourceRecord {
             class: 1,    // IN record class
             ttl: 60,     // TTL can be any value
             rdlength: 4, // Length of the IPv4 address
-            rdata: vec![8, 8, 8, 8],
+            rdata: ipv4_to_bytes(Ipv4Addr::new(8, 8, 8, 8)),
         }
     }
 
@@ -113,6 +113,10 @@ impl ResourceRecord {
         bytes.extend_from_slice(&self.rdata);
         bytes
     }
+}
+
+fn ipv4_to_bytes(ip: Ipv4Addr) -> Vec<u8> {
+    ip.octets().to_vec()
 }
 
 fn main() {
