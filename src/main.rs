@@ -77,7 +77,7 @@ impl DNSQuestion {
         bytes.push(b'\0'); // Null terminator
         bytes.extend_from_slice(&self.query_type.to_be_bytes());
         bytes.extend_from_slice(&self.query_class.to_be_bytes());
-        print!("bytes: {:?}", bytes)
+        print!("bytes: {:?}", bytes);
         bytes
     }
 }
