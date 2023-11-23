@@ -1,4 +1,4 @@
-use std::net::{UdpSocket, Ipv4Addr};
+use std::net::{Ipv4Addr, UdpSocket};
 
 // Connect to DNS server on http://127.0.0.1:2053
 
@@ -83,7 +83,7 @@ impl DNSQuestion {
 }
 
 struct ResourceRecord {
-    name: Vec<u8>,
+    domain_name: String,
     rtype: u16,
     class: u16,
     ttl: u32,
@@ -94,7 +94,7 @@ struct ResourceRecord {
 impl ResourceRecord {
     fn new() -> ResourceRecord {
         ResourceRecord {
-            name: vec!["codecrafters", "io", ""].join(".").as_bytes().to_vec(),
+            domain_name: "codecrafters.io".to_string(),
             rtype: 1,    // A record type
             class: 1,    // IN record class
             ttl: 60,     // TTL can be any value
@@ -104,8 +104,12 @@ impl ResourceRecord {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&self.name);
+        let mut bytes: Vec<u8> = Vec::new();
+        for label in self.domain_name.split('.') {
+            bytes.push(label.len() as u8);
+            bytes.extend_from_slice(label.as_bytes());
+        }
+        bytes.push(0);
         bytes.extend_from_slice(&self.rtype.to_be_bytes());
         bytes.extend_from_slice(&self.class.to_be_bytes());
         bytes.extend_from_slice(&self.ttl.to_be_bytes());
