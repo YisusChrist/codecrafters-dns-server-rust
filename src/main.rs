@@ -34,7 +34,7 @@ impl DnsHeader {
             ra: 0,
             z: 0,
             rcode: 0,
-            qdcount: 0, // Updated QDCOUNT for the question section
+            qdcount: 1, // Updated QDCOUNT for the question section
             ancount: 1, // Updated ANCOUNT for the answer section
             nscount: 0,
             arcount: 0,
