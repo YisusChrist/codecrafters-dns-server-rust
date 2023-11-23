@@ -1,4 +1,4 @@
-use std::net::{Ipv4Addr, UdpSocket};
+use std::net::UdpSocket;
 
 // Connect to DNS server on http://127.0.0.1:2053
 
@@ -34,7 +34,7 @@ impl DnsHeader {
             ra: 0,
             z: 0,
             rcode: 0,
-            qdcount: 1, // Updated QDCOUNT for the question section
+            qdcount: 0, // Updated QDCOUNT for the question section
             ancount: 1, // Updated ANCOUNT for the answer section
             nscount: 0,
             arcount: 0,
@@ -55,7 +55,7 @@ impl DnsHeader {
 }
 
 struct DNSQuestion {
-    domain_name: Vec<String>,
+    domain_name: String,
     query_type: u16,
     query_class: u16,
 }
@@ -63,7 +63,7 @@ struct DNSQuestion {
 impl DNSQuestion {
     fn new() -> DNSQuestion {
         DNSQuestion {
-            domain_name: vec!["codecrafters".to_string(), "io".to_string()],
+            domain_name: "codecrafters.io".to_string(),
             query_type: 1,  // A record type
             query_class: 1, // IN record class
         }
@@ -71,7 +71,7 @@ impl DNSQuestion {
 
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        for label in &self.domain_name {
+        for label in self.domain_name.split('.') {
             bytes.push(label.len() as u8);
             bytes.extend_from_slice(label.as_bytes());
         }
