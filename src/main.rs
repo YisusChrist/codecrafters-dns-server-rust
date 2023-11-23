@@ -34,7 +34,7 @@ impl DnsHeader {
             ra: 0,
             z: 0,
             rcode: 0,
-            qdcount: 0,
+            qdcount: 1,
             ancount: 0,
             nscount: 0,
             arcount: 0,
@@ -74,10 +74,9 @@ impl DNSQuestion {
             bytes.push(label.len() as u8);
             bytes.extend_from_slice(label.as_bytes());
         }
-        bytes.push(b'\0'); // Null terminator
+        bytes.push(0); // Null terminator
         bytes.extend_from_slice(&self.query_type.to_be_bytes());
         bytes.extend_from_slice(&self.query_class.to_be_bytes());
-        print!("bytes: {:?}", bytes);
         bytes
     }
 }
