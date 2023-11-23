@@ -61,11 +61,11 @@ struct DNSQuestion {
 }
 
 impl DNSQuestion {
-    pub fn new() -> DNSQuestion {
+    fn new() -> DNSQuestion {
         DNSQuestion {
             domain_name: vec!["codecrafters".to_string(), "io".to_string()],
-            query_type: 1,
-            query_class: 1,
+            query_type: 1,  // A record type
+            query_class: 1, // IN record class
         }
     }
     fn to_bytes(&self) -> Vec<u8> {
@@ -74,7 +74,7 @@ impl DNSQuestion {
             bytes.push(label.len() as u8);
             bytes.extend_from_slice(label.as_bytes());
         }
-        bytes.push(0); // Null terminator
+        bytes.push(b'\0'); // Null terminator
         bytes.extend_from_slice(&self.query_type.to_be_bytes());
         bytes.extend_from_slice(&self.query_class.to_be_bytes());
         bytes
