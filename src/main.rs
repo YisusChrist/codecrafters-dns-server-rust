@@ -1,11 +1,12 @@
+use byteorder::{BigEndian, ByteOrder};
 use std::net::UdpSocket;
 
 // Connect to DNS server on http://127.0.0.1:2053
 
 const SERVER_PORT: &str = "2053";
 const SERVER_ADDRESS: &str = "127.0.0.1";
-//const PACKET_IDENTIFIER: u16 = 1234;
 
+#[derive(Clone)]
 struct DnsHeader {
     id: u16,
     qr: u8,
@@ -69,11 +70,35 @@ struct DNSQuestion {
 }
 
 impl DNSQuestion {
-    fn new() -> DNSQuestion {
+    fn parse(data: &[u8]) -> DNSQuestion {
+        let mut domain_name = String::new();
+        let mut index = 0;
+
+        // Parse domain name
+        loop {
+            let label_len = data[index] as usize;
+            if label_len == 0 {
+                break;
+            }
+            if index > 0 {
+                domain_name.push('.');
+            }
+            domain_name
+                .push_str(std::str::from_utf8(&data[index + 1..index + 1 + label_len]).unwrap());
+            index += 1 + label_len;
+        }
+
+        // Skip null terminator
+        index += 1;
+
+        // Parse query type and class
+        let query_type = BigEndian::read_u16(&data[index..index + 2]);
+        let query_class = BigEndian::read_u16(&data[index + 2..index + 4]);
+
         DNSQuestion {
-            domain_name: "codecrafters.io".to_string(),
-            query_type: 1,  // A record type
-            query_class: 1, // IN record class
+            domain_name,
+            query_type,
+            query_class,
         }
     }
 
@@ -137,14 +162,17 @@ fn main() {
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
-                let _received_data = String::from_utf8_lossy(&buf[0..size]);
+                let dns_header = DnsHeader::new(&buf[0..size]);
                 println!("Received {} bytes from {}", size, source);
 
-                let dns_header = DnsHeader::new(&buf[0..size]);
-                let dns_question = DNSQuestion::new();
+                let dns_question = DNSQuestion::parse(&buf[12..]); // Assuming the question section starts at byte 12
                 let resource_record = ResourceRecord::new();
 
-                let mut response = dns_header.to_bytes();
+                let mut response_header = dns_header.clone();
+                response_header.qdcount = 1; // Assuming one question in the response
+                response_header.ancount = 1; // Assuming one answer in the response
+
+                let mut response = response_header.to_bytes();
                 response.extend_from_slice(&dns_question.to_bytes());
                 response.extend_from_slice(&resource_record.to_bytes());
 

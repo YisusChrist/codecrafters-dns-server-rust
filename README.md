@@ -28,6 +28,14 @@ various record types (A, AAAA, CNAME, etc) and more.
   - [Stage 4: Write answer section](#stage-4-write-answer-section)
     - [Answer section structure](#answer-section-structure)
     - [Rust Guide (Beta)](#rust-guide-beta-2)
+  - [Stage 5: Parse header section](#stage-5-parse-header-section)
+    - [Rust Guide (Beta)](#rust-guide-beta-3)
+  - [Stage 6: Parse question section](#stage-6-parse-question-section)
+    - [Rust Guide (Beta)](#rust-guide-beta-4)
+      - [Parsing the Question Section](#parsing-the-question-section)
+      - [Building the Response](#building-the-response)
+      - [The Question Section](#the-question-section)
+      - [The Answer Section](#the-answer-section)
 
 # Introduction
 
@@ -355,7 +363,7 @@ In this stage, you'll focus on extending your DNS server by adding the ability t
 The answer section consists of a list of Resource Records (RR). Each RR is a struct that consists of a [Name](https://doc.rust-lang.org/std/string/struct.String.html), [Type](https://doc.rust-lang.org/std/any/type_id/struct.TypeId.html), [Class](https://doc.rust-lang.org/std/any/type_id/struct.TypeId.html), [TTL](https://doc.rust-lang.org/std/time/struct.Instant.html) (Time To Live), [RDLENGTH](https://doc.rust-lang.org/std/primitive.usize.html) (Length), and [RDATA](https://doc.rust-lang.org/std/vec/struct.Vec.html) (Data).
 
 With Rust, you will define these attributes in your struct in the following way:
-    
+
 ```rust
 struct ResourceRecord {
     name: Vec<u8>,
@@ -370,7 +378,7 @@ struct ResourceRecord {
 Based on the instructions, the name should be the same as in the 'Question' section. You can reuse the same function for converting the domain name to the label sequence in Rust. For class and type, treat them as 2 bytes integers directly without conversion, and for the TTL field, you may select any value and convert it to [Big-endian](https://doc.rust-lang.org/std/primitive.u32.html#method.to_be) as instructed.
 
 The RDATA field differs per type, for instance for the "A" record type you need to convert an IP address to a 4-byte integer.
-    
+
 ```rust
 fn ipv4_to_bytes(ip: Ipv4Addr) -> Vec<u8> {
     let octets = ip.octets();
@@ -379,7 +387,7 @@ fn ipv4_to_bytes(ip: Ipv4Addr) -> Vec<u8> {
 ```
 
 Ensure to update the ANCOUNT (Answer count) field in the header section accordingly. You can do this using:
-    
+
 ```rust
 let ancount = answer_section.len() as u16;
 let ancount_bytes = ancount.to_be_bytes();
@@ -390,3 +398,170 @@ Remember to write tests for your new functions, to ensure they behave as expecte
 As usual, remember that Rust favors explicit error handling. Make good use of the [Result](https://doc.rust-lang.org/std/result/enum.Result.html) type as you did in the previous sections, to handle any possible errors that may come through in the processing of the DNS response.
 
 If you ever find yourself stuck, don't hesitate to look at the "Code Examples" on the platform. They can provide additional context and help you understand how to approach the problem. Happy coding!
+
+## Stage 5: Parse header section
+
+Up until now, we were ignoring the contents of the DNS packet that we received and hardcoding `1234` as the ID in the response. In this stage, you'll have to parse the DNS packet that you receive and respond with the same ID in the response. You'll also need to set some other fields in the header section.
+
+Just like the previous stage, the tester will execute your program like this:
+
+```sh
+./your_server.sh
+```
+
+It'll then send a UDP packet (containing a DNS query) to port 2053.
+
+Your program will need to respond with a DNS reply packet that contains a header section with the following values:
+
+| **Field**                         | **Size** | **Expected value**                                                        |
+| --------------------------------- | -------- | ------------------------------------------------------------------------- |
+| Packet Identifier (ID)            | 16 bits  | Mimic the 16 bit packet identifier from the request packet sent by tester |
+| Query/Response Indicator (QR)     | 1 bit    | 1                                                                         |
+| Operation Code (OPCODE)           | 4 bits   | Mimic the OPCODE value sent by the tester                                 |
+| Authoritative Answer (AA)         | 1 bit    | 0                                                                         |
+| Truncation (TC)                   | 1 bit    | 0                                                                         |
+| Recursion Desired (RD)            | 1 bit    | Mimic the RD value sent by the tester                                     |
+| Recursion Available (RA)          | 1 bit    | 0                                                                         |
+| Reserved (Z)                      | 3 bits   | 0                                                                         |
+| Response Code (RCODE)             | 4 bits   | 0 (no error) if OPCODE is 0 (standard query) else 4 (not implemented)     |
+| Question Count (QDCOUNT)          | 16 bits  | Any valid value                                                           |
+| Answer Record Count (ANCOUNT)     | 16 bits  | Any valid value                                                           |
+| Authority Record Count (NSCOUNT)  | 16 bits  | Any valid value                                                           |
+| Additional Record Count (ARCOUNT) | 16 bits  | Any valid value                                                           |
+
+The tester will not check what follows the header section as long as it is a valid DNS packet.
+
+---
+
+### Rust Guide (Beta)
+
+In this stage, you'll be parsing the header of the DNS packet received by your server, and mimicking some of the fields within it in your response.
+
+You will be dealing with bit-level manipulations in Rust to implement this stage. The first step will be to define a struct for the DNS header and fill it up with the received data from the UDP packet. See the example below:
+
+```rust
+#[repr(C, packed)]
+#[derive(Default)]
+struct DnsHeader {
+    id: u16,
+    flags: u16,
+    qdcount: u16,
+    ancount: u16,
+    nscount: u16,
+    arcount: u16,
+}
+```
+
+Here, we are using the `repr(C, packed)` attribute to ensure that Rust does not add any padding bytes between the fields, which is crucial because we're going to be reading this data directly from the incoming byte stream.
+
+You can use the `byteorder` crate to help read these binary values in network byte order (big-endian). Here's how you could read a packet:
+
+```rust
+use byteorder::{ByteOrder, BigEndian};
+
+// Receive packet data from socket...
+
+let header = unsafe {
+    let mut buffer: DnsHeader = std::mem::zeroed();
+    let header_bytes = std::slice::from_raw_parts_mut(&mut buffer as *mut _ as *mut u8, std::mem::size_of::<DnsHeader>());
+    header_bytes.copy_from_slice(&packet_data[0..12]);
+
+    buffer.id = BigEndian::read_u16(&header_bytes[0..2]);
+    buffer.flags = BigEndian::read_u16(&header_bytes[2..4]);
+    buffer.qdcount = BigEndian::read_u16(&header_bytes[4..6]);
+    buffer.ancount = BigEndian::read_u16(&header_bytes[6..8]);
+    buffer.nscount = BigEndian::read_u16(&header_bytes[8..10]);
+    buffer.arcount = BigEndian::read_u16(&header_bytes[10..12]);
+
+    buffer
+};
+```
+
+To manipulate the `flags` field and change bits according to instructions, you will have to work with bitwise operators. For example, you can set the Query/Response Indicator (QR) bit to `1` like this:
+
+```rust
+header.flags |= 0b1000_0000_0000_0000;
+```
+
+Similar techniques can be employed to mask and set other requisite bits. Once you've created and manipulated the header, you can send it back.
+
+I strongly encourage you to go through the "Functionality" part of the `byteorder` crate's documentation to understand how it can be used effectively. It provides a detailed view to handle different data types effectively.
+
+Remember, for any additional help or code samples, you can always take a look at the platform's "Code Examples" section. Keep going!
+
+## Stage 6: Parse question section
+
+In this stage you'll extend your DNS server to parse the question section of the DNS message you receive.
+
+Just like the previous stage, the tester will execute your program like this:
+
+```sh
+./your_server.sh
+```
+
+It'll then send a UDP packet (containing a DNS query) to port 2053 that contains a question section as follows:
+
+| **Field** | **Value sent by the tester**                                                    |
+| --------- | ------------------------------------------------------------------------------- |
+| Name      | A random domain encoded as a label sequence (refer to stage \#3 for details)    |
+| Type      | `1` encoded as a 2-byte big-endian int (corresponding to the "A" record type)   |
+| Class     | `1` encoded as a 2-byte big-endian int (corresponding to the "IN" record class) |
+
+The question type will always be `A` for this stage and the question class will always be `IN`. So your parser only needs to account for those record types for now.
+
+Your program will need to respond with a DNS reply packet that contains:
+
+- a header section (same as in [stage \#5](#stage-5-parse-header-section))
+- a question section (**new in this stage**)
+- an answer section (**new in this stage**)
+
+**Expected values for the question section:**
+
+| **Field** | **Expected value**                                                              |
+| --------- | ------------------------------------------------------------------------------- |
+| Name      | Mimic the domain name (as label sequence)                                       |
+| Type      | `1` encoded as a 2-byte big-endian int (corresponding to the "A" record type)   |
+| Class     | `1` encoded as a 2-byte big-endian int (corresponding to the "IN" record class) |
+
+**Expected values for the answer section:**
+
+| **Field** | **Expected Value**                                                                                                                 |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Name      | Mimic the domain name (as label sequence)                                                                                          |
+| Type      | `1` encoded as a 2-byte big-endian int (corresponding to the "A" record type)                                                      |
+| Class     | `1` encoded as a 2-byte big-endian int (corresponding to the "IN" record class)                                                    |
+| TTL       | Any value, encoded as a 4-byte big-endian int. For example: `60`.                                                                  |
+| Length    | `4`, encoded as a 2-byte big-endian int (corresponds to the length of the RDATA field)                                             |
+| Data      | Any IP address, encoded as a 4-byte big-endian int. For example: `\x08\x08\x08\x08` (that's `8.8.8.8` encoded as a 4-byte integer) |
+
+### Rust Guide (Beta)
+
+In this stage, you will extend your DNS server to parse the question section of the DNS message you receive and return a DNS response packet with header, question, and answer sections filled.
+
+Let's break this down:
+
+#### Parsing the Question Section
+
+You will need to parse the incoming UDP packet and extract the question section which contains the "Name", "Type", and "Class" fields. The method used to parse the DNS packet in the previous stage can be expanded to include these fields, storing them in variables for later use.
+
+The "Name" field is a domain name, encoded as a label sequence. This sequence will be a series of length-prefixed labels, with "." replaced by "0".
+
+The "Type" and "Class" fields can be read as an unsigned 16-bit value, with Rust's [read_u16](https://doc.rust-lang.org/std/io/trait.Read.html#method.read_u16) method. Just remember that the values are big-endian so we should use `read_u16::<BigEndian>()`.
+
+#### Building the Response
+
+Formulating the response involves generating three sections: header, question, and answer. You've already implemented the header in the previous stage, so let's look at the other two.
+
+#### The Question Section
+
+Start by reassembling the "Name" field as it was in the incoming DNS packet. The "Type" and "Class" fields will be `1`, encoded as a 2-byte big endian int, just as they were in the query.
+
+#### The Answer Section
+
+Like with the question section, reconstruct the "Name" field. The "Type" and "Class" will be `1` and `1` respectively, just like in the question section. Given the "TTL" and "Data" can be any valid values, you might choose to hardcode them for simplicity. "Length" will be `4` to match the length of the IP address in the "Data" field.
+
+For writing multi-byte integers as big-endian, make use of the `write_u16::<BigEndian>` and `write_u32::<BigEndian>` functions from the [BytesOrder crate](https://docs.rs/byteorder/1.4.3/byteorder/) in your response.
+
+Remember to follow Rust best practices when building the response and handling potential errors.
+
+Lastly, don't forget to ask for help, when needed. Review "Code Examples" for further assistance and continue programming with patience and perseverance!
