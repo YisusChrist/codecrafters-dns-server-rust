@@ -1,17 +1,21 @@
-use byteorder::{ByteOrder, BigEndian};
 use std::net::UdpSocket;
 
 // Connect to DNS server on http://127.0.0.1:2053
 
 const SERVER_PORT: &str = "2053";
 const SERVER_ADDRESS: &str = "127.0.0.1";
-const PACKET_IDENTIFIER: u16 = 1234;
+//const PACKET_IDENTIFIER: u16 = 1234;
 
-#[repr(C, packed)]
-#[derive(Default)]
 struct DnsHeader {
     id: u16,
-    flags: u16,
+    qr: u8,
+    opcode: u8,
+    aa: u8,
+    tc: u8,
+    rd: u8,
+    ra: u8,
+    z: u8,
+    rcode: u8,
     qdcount: u16,
     ancount: u16,
     nscount: u16,
@@ -19,32 +23,37 @@ struct DnsHeader {
 }
 
 impl DnsHeader {
-    fn new() -> DnsHeader {
+    fn new(data: &[u8]) -> DnsHeader {
+        let mut id = [0u8; 2];
+        id.copy_from_slice(&data[..2]);
+
+        let id = u16::from_be_bytes(id);
+        let opcode = (data[2] >> 3) & 15;
+        let rd = data[2] & 1;
+        let rcode = if opcode == 0 { 0u8 } else { 4u8 };
+
         DnsHeader {
-            id: PACKET_IDENTIFIER,
-            flags: 0b1000_0000_0000_0000, // Set QR bit to 1
-            qdcount: 1, // Set QDCOUNT to any valid value
-            ancount: 1, // Set ANCOUNT to any valid value
-            nscount: 0, // Set NSCOUNT to any valid value
-            arcount: 0, // Set ARCOUNT to any valid value
+            id,
+            qr: 1,
+            opcode,
+            aa: 0,
+            tc: 0,
+            rd,
+            ra: 0,
+            z: 0,
+            rcode,
+            qdcount: 1, // Updated QDCOUNT for the question section
+            ancount: 1, // Updated ANCOUNT for the answer section
+            nscount: 0,
+            arcount: 0,
         }
     }
 
-    fn mimic_flags(&mut self, flags: u16) {
-        // Set OPCODE, RD bits based on received flags
-        self.flags |= flags & 0b0000_0111_1000_0000;
-        // Set RCODE to 4 if OPCODE is 0, else set to 0
-        self.flags |= if (self.flags & 0b0000_0000_0111_1000) == 0 {
-            0b0000_0000_0000_0100
-        } else {
-            0
-        };
-    }
-
     fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+        let mut bytes = Vec::with_capacity(12);
         bytes.extend_from_slice(&self.id.to_be_bytes());
-        bytes.extend_from_slice(&self.flags.to_be_bytes());
+        bytes.push((self.qr << 7) | (self.opcode << 3) | (self.aa << 2) | (self.tc << 1) | self.rd);
+        bytes.push((self.ra << 7) | (self.z << 4) | self.rcode);
         bytes.extend_from_slice(&self.qdcount.to_be_bytes());
         bytes.extend_from_slice(&self.ancount.to_be_bytes());
         bytes.extend_from_slice(&self.nscount.to_be_bytes());
@@ -131,13 +140,7 @@ fn main() {
                 let _received_data = String::from_utf8_lossy(&buf[0..size]);
                 println!("Received {} bytes from {}", size, source);
 
-                let mut dns_header = DnsHeader::new();
-                
-                // Parse the received DNS header
-                dns_header.id = BigEndian::read_u16(&buf[0..2]);
-                let flags = BigEndian::read_u16(&buf[2..4]);
-                dns_header.mimic_flags(flags);
-                
+                let dns_header = DnsHeader::new(&buf[0..size]);
                 let dns_question = DNSQuestion::new();
                 let resource_record = ResourceRecord::new();
 

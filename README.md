@@ -27,6 +27,7 @@ various record types (A, AAAA, CNAME, etc) and more.
     - [Rust Guide (Beta)](#rust-guide-beta-1)
   - [Stage 4: Write answer section](#stage-4-write-answer-section)
     - [Answer section structure](#answer-section-structure)
+    - [Rust Guide (Beta)](#rust-guide-beta-2)
 
 # Introduction
 
@@ -321,21 +322,71 @@ In this stage, we'll only deal with the "A" record type, which maps a domain nam
 
 Just like in the previous stage, the tester will execute your program like this:
 
+```sh
 ./your_server.sh
+```
+
 It'll then send a UDP packet (containing a DNS query) to port 2053.
 
 Your program will need to respond with a DNS reply packet that contains:
 
-a header section (same as in stage #2)
-a question section (same as in stage #3)
-an answer section (new in this stage!)
-Your answer section should contain a single RR, with the following values:
+- a header section (same as in stage #2)
+- a question section (same as in stage #3)
+- an answer section (**new in this stage!**)
+  Your answer section should contain a single RR, with the following values:
 
-Field Expected Value
-Name \x0ccodecrafters\x02io followed by a null byte (that's codecrafters.io encoded as a label sequence)
-Type 1 encoded as a 2-byte big-endian int (corresponding to the "A" record type)
-Class 1 encoded as a 2-byte big-endian int (corresponding to the "IN" record class)
-TTL Any value, encoded as a 4-byte big-endian int. For example: 60.
-Length 4, encoded as a 2-byte big-endian int (corresponds to the length of the RDATA field)
-Data Any IP address, encoded as a 4-byte big-endian int. For example: \x08\x08\x08\x08 (that's 8.8.8.8 encoded as a 4-byte integer)
-Make sure to update the ANCOUNT field in the header section accordingly, and remember to set the id to 1234.
+| **Field** | **Expected Value**                                                                                                                 |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Name      | `\x0ccodecrafters\x02io` followed by a null byte (that's `codecrafters.io` encoded as a label sequence)                            |
+| Type      | `1` encoded as a 2-byte big-endian int (corresponding to the "A" record type)                                                      |
+| Class     | `1` encoded as a 2-byte big-endian int (corresponding to the "IN" record class)                                                    |
+| TTL       | Any value, encoded as a 4-byte big-endian int. For example: `60`.                                                                  |
+| Length    | `4`, encoded as a 2-byte big-endian int (corresponds to the length of the RDATA field)                                             |
+| Data      | Any IP address, encoded as a 4-byte big-endian int. For example: `\x08\x08\x08\x08` (that's `8.8.8.8` encoded as a 4-byte integer) |
+
+Make sure to update the `ANCOUNT` field in the header section accordingly, and remember to set the id to `1234`.
+
+---
+
+### Rust Guide (Beta)
+
+In this stage, you'll focus on extending your DNS server by adding the ability to respond with the "answer" section of a DNS message.
+
+The answer section consists of a list of Resource Records (RR). Each RR is a struct that consists of a [Name](https://doc.rust-lang.org/std/string/struct.String.html), [Type](https://doc.rust-lang.org/std/any/type_id/struct.TypeId.html), [Class](https://doc.rust-lang.org/std/any/type_id/struct.TypeId.html), [TTL](https://doc.rust-lang.org/std/time/struct.Instant.html) (Time To Live), [RDLENGTH](https://doc.rust-lang.org/std/primitive.usize.html) (Length), and [RDATA](https://doc.rust-lang.org/std/vec/struct.Vec.html) (Data).
+
+With Rust, you will define these attributes in your struct in the following way:
+    
+```rust
+struct ResourceRecord {
+    name: Vec<u8>,
+    type: u16,
+    class: u16,
+    ttl: u32,
+    rdlength: u16,
+    rdata: Vec<u8>,
+}
+```
+
+Based on the instructions, the name should be the same as in the 'Question' section. You can reuse the same function for converting the domain name to the label sequence in Rust. For class and type, treat them as 2 bytes integers directly without conversion, and for the TTL field, you may select any value and convert it to [Big-endian](https://doc.rust-lang.org/std/primitive.u32.html#method.to_be) as instructed.
+
+The RDATA field differs per type, for instance for the "A" record type you need to convert an IP address to a 4-byte integer.
+    
+```rust
+fn ipv4_to_bytes(ip: Ipv4Addr) -> Vec<u8> {
+    let octets = ip.octets();
+    octets.to_vec()
+}
+```
+
+Ensure to update the ANCOUNT (Answer count) field in the header section accordingly. You can do this using:
+    
+```rust
+let ancount = answer_section.len() as u16;
+let ancount_bytes = ancount.to_be_bytes();
+```
+
+Remember to write tests for your new functions, to ensure they behave as expected.
+
+As usual, remember that Rust favors explicit error handling. Make good use of the [Result](https://doc.rust-lang.org/std/result/enum.Result.html) type as you did in the previous sections, to handle any possible errors that may come through in the processing of the DNS response.
+
+If you ever find yourself stuck, don't hesitate to look at the "Code Examples" on the platform. They can provide additional context and help you understand how to approach the problem. Happy coding!
