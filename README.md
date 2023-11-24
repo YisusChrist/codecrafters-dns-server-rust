@@ -24,6 +24,9 @@ various record types (A, AAAA, CNAME, etc) and more.
   - [Stage 3: Write question section](#stage-3-write-question-section)
     - [Question section structure](#question-section-structure)
     - [Domain name encoding](#domain-name-encoding)
+    - [Rust Guide (Beta)](#rust-guide-beta-1)
+  - [Stage 4: Write answer section](#stage-4-write-answer-section)
+    - [Answer section structure](#answer-section-structure)
 
 # Introduction
 
@@ -216,13 +219,123 @@ For example:
 
 Just like in the previous stage, the tester will execute your program like this:
 
+```sh
 ./your_server.sh
+```
+
 It'll then send a UDP packet (containing a DNS query) to port 2053. Your program will need to respond with a DNS reply packet that contains the question section described above (along with the header section from the previous stage).
 
 Here are the expected values for the question section:
 
-Field Expected value
+| **Field** | **Expected value**                                                                                      |
+| --------- | ------------------------------------------------------------------------------------------------------- |
+| Name      | `\x0ccodecrafters\x02io` followed by a null byte (that's `codecrafters.io` encoded as a label sequence) |
+| Type      | 1 encoded as a 2-byte big-endian int (corresponding to the "A" record type)                             |
+| Class     | 1 encoded as a 2-byte big-endian int (corresponding to the "IN" record class)                           |
+
+Make sure to update the `QDCOUNT` field in the header section accordingly, and remember to set the id to `1234`.
+
+---
+
+### Rust Guide (Beta)
+
+In this stage, we are going to build upon the DNS server that we've started building in the earlier stages. We will be expanding the DNS response to include the "question" section carrying the queried domain name, query type, and class.
+
+Let's get started by defining the structure of the question in Rust:
+
+```rust
+struct DNSQuestion {
+    domain_name: String,
+    query_type: u16,
+    query_class: u16,
+}
+```
+
+Rust's [From](https://doc.rust-lang.org/std/convert/trait.From.html) trait can be implemented to convert the domain name string to encoded label format as described in the instructions. Remember that it must end with a null byte (`\0`).
+
+```rust
+impl From<&str> for &[u8] {
+fn from(domain: &str) -> Self { ... }
+}
+```
+
+Next, we need to build the "question" section by encoding the `domain_name`, `query_type` and `query_class` in order.
+
+To do that, we will define a method to convert a `DNSQuestion` into a byte vector:
+
+```rust
+impl DNSQuestion {
+   fn to_bytes(&self) -> Vec<u8> {
+      let mut bytes = Vec::new();
+      ...
+      bytes
+   }
+}
+```
+
+Start by pushing the encoded `domain_name` to our byte vector, use the [extend_from_slice](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.extend_from_slice) method from `Vec`, which copies elements from a slice into the vector.
+
+```rust
+bytes.extend_from_slice(&self.domain_name.as_encoded_label[]);
+```
+
+After encoding the domain name, convert `query_type` and `query_class` to a big endian representation using the [to_be_bytes](https://doc.rust-lang.org/std/primitive.u16.html#method.to_be_bytes) function and append them to the vector. This function returns an array which can be appended much like how we appended the `domain_name`:
+
+```rust
+bytes.extend_from_slice(&self.query_type.to_be_bytes());
+bytes.extend_from_slice(&self.query_class.to_be_bytes());
+```
+
+This will complete the encoding of our "question" section.
+
+We are now ready to send the DNS response. Just like in the previous stage, the "question" section bytes should be appended to the "header" section bytes before sending.
+
+Finally, don't forget to update `QDCOUNT` field (Question Count) in the header section!
+
+As always, if something doesn't work as expected, take a look at your error messages and try to decipher them. Rust's error messages are usually quite helpful. If you need an extra push, you can examine the "Code Examples" provided for more insights.
+
+## Stage 4: Write answer section
+
+In this stage, you'll extend your DNS server to respond with the "answer" section, the third section of a DNS message.
+
+### Answer section structure
+
+The answer section contains a list of RRs (Resource Records), which are answers to the questions asked in the question section.
+
+Each RR has the following structure:
+
+| **Field**           | **Type**       | **Description**                                                                                                          |
+| ------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Name                | Label Sequence | The domain name encoded as a sequence of labels.                                                                         |
+| Type                | 2-byte Integer | `1` for an A record, `5` for a CNAME record etc., full list [here](https://www.rfc-editor.org/rfc/rfc1035#section-3.2.2) |
+| Class               | 2-byte Integer | Usually set to `1` (full list [here](https://www.rfc-editor.org/rfc/rfc1035#section-3.2.4))                              |
+| TTL (Time-To-Live)  | 4-byte Integer | The duration in seconds a record can be cached before requerying.                                                        |
+| Length (`RDLENGTH`) | 2-byte Integer | Length of the RDATA field in bytes.                                                                                      |
+| Data (`RDATA`)      | Variable       | Data specific to the record type.                                                                                        |
+
+[Section 3.2.1](https://www.rfc-editor.org/rfc/rfc1035#section-3.2.1) of the RFC covers the answer section format in detail.
+
+In this stage, we'll only deal with the "A" record type, which maps a domain name to an IPv4 address. The RDATA field for an "A" record type is a 4-byte integer representing the IPv4 address.
+
+---
+
+Just like in the previous stage, the tester will execute your program like this:
+
+./your_server.sh
+It'll then send a UDP packet (containing a DNS query) to port 2053.
+
+Your program will need to respond with a DNS reply packet that contains:
+
+a header section (same as in stage #2)
+a question section (same as in stage #3)
+an answer section (new in this stage!)
+Your answer section should contain a single RR, with the following values:
+
+Field Expected Value
 Name \x0ccodecrafters\x02io followed by a null byte (that's codecrafters.io encoded as a label sequence)
 Type 1 encoded as a 2-byte big-endian int (corresponding to the "A" record type)
 Class 1 encoded as a 2-byte big-endian int (corresponding to the "IN" record class)
-Make sure to update the QDCOUNT field in the header section accordingly, and remember to set the id to 1234.
+TTL Any value, encoded as a 4-byte big-endian int. For example: 60.
+Length 4, encoded as a 2-byte big-endian int (corresponds to the length of the RDATA field)
+Data Any IP address, encoded as a 4-byte big-endian int. For example: \x08\x08\x08\x08 (that's 8.8.8.8 encoded as a 4-byte integer)
+Make sure to update the ANCOUNT field in the header section accordingly, and remember to set the id to 1234.
