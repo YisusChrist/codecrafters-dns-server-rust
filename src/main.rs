@@ -24,7 +24,7 @@ struct DnsHeader {
 }
 
 impl DnsHeader {
-    fn new(data: &[u8]) -> DnsHeader {
+    fn new(data: &[u8], num_answers: u16) -> DnsHeader {
         let mut id = [0u8; 2];
         id.copy_from_slice(&data[..2]);
 
@@ -43,8 +43,8 @@ impl DnsHeader {
             ra: 0,
             z: 0,
             rcode,
-            qdcount: 1, // Updated QDCOUNT for the question section
-            ancount: 1, // Updated ANCOUNT for the answer section
+            qdcount: 1,
+            ancount: num_answers,
             nscount: 0,
             arcount: 0,
         }
@@ -185,7 +185,7 @@ fn main() {
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
-                let dns_header = DnsHeader::new(&buf[0..size]);
+                let dns_header = DnsHeader::new(&buf[0..size], 2);
                 println!("Received {} bytes from {}", size, source);
 
                 let dns_question = DNSQuestion::parse(&buf[12..], &buf);
