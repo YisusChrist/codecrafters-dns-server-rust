@@ -36,6 +36,8 @@ various record types (A, AAAA, CNAME, etc) and more.
       - [Building the Response](#building-the-response)
       - [The Question Section](#the-question-section)
       - [The Answer Section](#the-answer-section)
+  - [Stage 7: Parse compressed packet](#stage-7-parse-compressed-packet)
+    - [Rust Guide (Beta)](#rust-guide-beta-5)
 
 # Introduction
 
@@ -534,6 +536,8 @@ Your program will need to respond with a DNS reply packet that contains:
 | Length    | `4`, encoded as a 2-byte big-endian int (corresponds to the length of the RDATA field)                                             |
 | Data      | Any IP address, encoded as a 4-byte big-endian int. For example: `\x08\x08\x08\x08` (that's `8.8.8.8` encoded as a 4-byte integer) |
 
+---
+
 ### Rust Guide (Beta)
 
 In this stage, you will extend your DNS server to parse the question section of the DNS message you receive and return a DNS response packet with header, question, and answer sections filled.
@@ -565,3 +569,38 @@ For writing multi-byte integers as big-endian, make use of the `write_u16::<BigE
 Remember to follow Rust best practices when building the response and handling potential errors.
 
 Lastly, don't forget to ask for help, when needed. Review "Code Examples" for further assistance and continue programming with patience and perseverance!
+
+## Stage 7: Parse compressed packet
+
+In this stage we will parse the DNS question section which has compressed the question label sequences. You will be sent multiple values in the question section and you have to parse the queries and respond with the same question section in the response along with answers for them. As for the answer section, respond with an `A` record type which can take any value of your choosing for each question. You don't need to compress your response. We will never ask you to do something that will overflow the buffer size restriction of UDP, so compressing your response packet is not something you have to worry about.
+
+The question type will always be `A` and the question class will always be `IN`.
+
+[This section](https://www.rfc-editor.org/rfc/rfc1035#section-4.1.4) of the RFC covers how this compression works.
+
+---
+
+### Rust Guide (Beta)
+
+In this stage, you'll be building on your existing knowledge to parse the DNS question section which has compressed the question label sequences. As the first step, we'll learn how to parse the compressed label.
+
+In short, DNS message compression helps to carry the same information in fewer bytes, which is critical given DNS limits packet size. When names or sequences are repeated within a DNS message, we can simply begin the second instance with a pointer to the first.
+
+You would approach this in Rust by having a [function](https://doc.rust-lang.org/std/keyword.fn.html) to parse a compressed sequence. You'll have to use byte manipulation to decompress the bytes as explained in the given RFC section. One way to approach this would be to read the bytes starting from the first. The first two bits signify if the name is compressed or not. If it is compressed, the rest of the byte along with the next byte form a pointer to another part of the message where the rest of the name is stored. If it's not compressed, then the byte signifies the length of the following segment of the name, and you can proceed to read that many bytes.
+
+For handling pointers in Rust, you can create a [stack](https://doc.rust-lang.org/std/collections/struct.Vec.html) of the positions that you have to return to after handling the compression.
+
+Here is a high level implementation strategy:
+
+1. Initialize an empty string to hold the domain name and a stack to keep track of positions to return to.
+2. Read the first byte to check if it's a pointer or a label having DNS name.
+3. If it's a pointer, [push](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.push) the next position onto the stack and jump to the position pointed by the current byte.
+4. If it's a label, read the specified number of bytes, [append](https://doc.rust-lang.org/std/string/struct.String.html#method.push_str) them to your result string, and move to the next position.
+5. At the end of a label (denoted by a byte `0x00`), if there's a position in the stack, [pop](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.pop) it and jump back to that position.
+6. End reading when you hit the end of a label sequence (i.e., a byte `0x00`) and there's no position in the stack to return to.
+
+As a tip, consider Rust's byteorder crate (rust-byteorder) which provides utilities to help you convert bytes to integers of desired length and ordering.
+
+As for the response, you won't need to worry about compressing - you can respond with full domain names.
+
+Remember, don't hesitate to look into "Code Examples" if you need extra help in understanding these concepts. That's what they are there for!

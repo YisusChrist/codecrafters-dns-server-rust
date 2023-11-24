@@ -70,22 +70,45 @@ struct DNSQuestion {
 }
 
 impl DNSQuestion {
-    fn parse(data: &[u8]) -> DNSQuestion {
+    fn parse(data: &[u8], original_data: &[u8]) -> DNSQuestion {
         let mut domain_name = String::new();
         let mut index = 0;
 
-        // Parse domain name
         loop {
             let label_len = data[index] as usize;
+
             if label_len == 0 {
                 break;
             }
-            if index > 0 {
-                domain_name.push('.');
+
+            if label_len & 0xC0 == 0xC0 {
+                // Compressed label
+                let offset_bytes = BigEndian::read_u16(&data[index..index + 2]);
+                let offset = offset_bytes & 0x3FFF; // Masking the top two bits
+
+                if offset >= original_data.len() as u16 {
+                    // Invalid offset, break to avoid potential infinite loop
+                    break;
+                }
+
+                // Recursively parse the compressed name starting from the offset
+                let compressed_data = &original_data[offset as usize..];
+                let compressed_question = DNSQuestion::parse(compressed_data, original_data);
+
+                domain_name.push_str(&compressed_question.domain_name);
+                break;
+            } else {
+                // Uncompressed label
+                if index > 0 {
+                    domain_name.push('.');
+                }
+
+                domain_name.push_str(
+                    std::str::from_utf8(&data[index + 1..index + 1 + label_len])
+                        .unwrap_or_default(),
+                );
+                index += 1 + label_len;
             }
-            domain_name
-                .push_str(std::str::from_utf8(&data[index + 1..index + 1 + label_len]).unwrap());
-            index += 1 + label_len;
         }
 
         // Skip null terminator
@@ -165,7 +188,7 @@ fn main() {
                 let dns_header = DnsHeader::new(&buf[0..size]);
                 println!("Received {} bytes from {}", size, source);
 
-                let dns_question = DNSQuestion::parse(&buf[12..]); // Assuming the question section starts at byte 12
+                let dns_question = DNSQuestion::parse(&buf[12..], &buf);
                 let resource_record = ResourceRecord::new();
 
                 let mut response_header = dns_header.clone();
