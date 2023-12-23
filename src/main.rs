@@ -24,7 +24,7 @@ struct DnsHeader {
 }
 
 impl DnsHeader {
-    fn new(data: &[u8], num_answers: u16) -> DnsHeader {
+    fn new(data: &[u8]) -> DnsHeader {
         let mut id = [0u8; 2];
         id.copy_from_slice(&data[..2]);
 
@@ -43,8 +43,8 @@ impl DnsHeader {
             ra: 0,
             z: 0,
             rcode,
-            qdcount: 1,
-            ancount: num_answers,
+            qdcount: 1, // Updated QDCOUNT for the question section
+            ancount: 1, // Updated ANCOUNT for the answer section
             nscount: 0,
             arcount: 0,
         }
@@ -184,29 +184,40 @@ fn main() {
 
     loop {
         match udp_socket.recv_from(&mut buf) {
-            Ok((size, source)) => {
-                let dns_header = DnsHeader::new(&buf[0..size], 2);
-                println!("Received {} bytes from {}", size, source);
-
-                let dns_question = DNSQuestion::parse(&buf[12..], &buf);
-                let resource_record = ResourceRecord::new();
-
-                let mut response_header = dns_header.clone();
-                response_header.qdcount = 1; // Assuming one question in the response
-                response_header.ancount = 1; // Assuming one answer in the response
-
-                let mut response = response_header.to_bytes();
-                response.extend_from_slice(&dns_question.to_bytes());
-                response.extend_from_slice(&resource_record.to_bytes());
-
-                udp_socket
-                    .send_to(&response, source)
-                    .expect("Failed to send response");
-            }
+            Ok((size, source)) => match handle_dns_request(&buf[..size], &buf, &source) {
+                Ok(response) => {
+                    udp_socket
+                        .send_to(&response, source)
+                        .expect("Failed to send response");
+                }
+                Err(err) => eprintln!("Error processing DNS request: {}", err),
+            },
             Err(e) => {
                 eprintln!("Error receiving data: {}", e);
                 break;
             }
         }
     }
+}
+
+fn handle_dns_request(
+    request_data: &[u8],
+    original_data: &[u8],
+    source: &std::net::SocketAddr,
+) -> Result<Vec<u8>, &'static str> {
+    let dns_header = DnsHeader::new(request_data);
+    println!("Received {} bytes from {}", request_data.len(), source);
+
+    let dns_question = DNSQuestion::parse(&request_data[12..], original_data);
+    let resource_record = ResourceRecord::new();
+
+    let mut response_header = dns_header.clone();
+    response_header.qdcount = 1;
+    response_header.ancount = 1;
+
+    let mut response = response_header.to_bytes();
+    response.extend_from_slice(&dns_question.to_bytes());
+    response.extend_from_slice(&resource_record.to_bytes());
+
+    Ok(response)
 }
