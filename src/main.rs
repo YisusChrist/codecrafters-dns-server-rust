@@ -161,39 +161,29 @@ fn main() {
 
     loop {
         match udp_socket.recv_from(&mut buf) {
-            Ok((size, source)) => match handle_dns_request(&buf[..size], &source) {
-                Ok(response) => {
-                    udp_socket
-                        .send_to(&response, source)
-                        .expect("Failed to send response");
-                }
-                Err(err) => eprintln!("Error processing DNS request: {}", err),
-            },
+            Ok((size, source)) => {
+                let dns_header = DnsHeader::new(&buf[0..size]);
+                println!("Received {} bytes from {}", size, source);
+
+                let dns_question = DNSQuestion::parse(&buf[12..]); // Assuming the question section starts at byte 12
+                let resource_record = ResourceRecord::new();
+
+                let mut response_header = dns_header.clone();
+                response_header.qdcount = 1; // Assuming one question in the response
+                response_header.ancount = 1; // Assuming one answer in the response
+
+                let mut response = response_header.to_bytes();
+                response.extend_from_slice(&dns_question.to_bytes());
+                response.extend_from_slice(&resource_record.to_bytes());
+
+                udp_socket
+                    .send_to(&response, source)
+                    .expect("Failed to send response");
+            }
             Err(e) => {
                 eprintln!("Error receiving data: {}", e);
                 break;
             }
         }
     }
-}
-
-fn handle_dns_request(
-    request_data: &[u8],
-    source: &std::net::SocketAddr,
-) -> Result<Vec<u8>, &'static str> {
-    let dns_header = DnsHeader::new(request_data);
-    println!("Received {} bytes from {}", request_data.len(), source);
-
-    let dns_question = DNSQuestion::parse(&request_data[12..]);
-    let resource_record = ResourceRecord::new();
-
-    let mut response_header = dns_header.clone();
-    response_header.qdcount = 1; // Updated QDCOUNT for the question section
-    response_header.ancount = 1; // Updated ANCOUNT for the answer section
-
-    let mut response = response_header.to_bytes();
-    response.extend_from_slice(&dns_question.to_bytes());
-    response.extend_from_slice(&resource_record.to_bytes());
-
-    Ok(response)
 }
