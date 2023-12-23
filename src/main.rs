@@ -70,7 +70,7 @@ struct DNSQuestion {
 }
 
 impl DNSQuestion {
-    fn parse(data: &[u8], original_data: &[u8]) -> DNSQuestion {
+    fn parse(data: &[u8]) -> DNSQuestion {
         let mut domain_name = String::new();
         let mut index = 0;
 
@@ -161,7 +161,7 @@ fn main() {
 
     loop {
         match udp_socket.recv_from(&mut buf) {
-            Ok((size, source)) => match handle_dns_request(&buf[..size], &buf, &source) {
+            Ok((size, source)) => match handle_dns_request(&buf[..size], &source) {
                 Ok(response) => {
                     udp_socket
                         .send_to(&response, source)
@@ -179,18 +179,17 @@ fn main() {
 
 fn handle_dns_request(
     request_data: &[u8],
-    original_data: &[u8],
     source: &std::net::SocketAddr,
 ) -> Result<Vec<u8>, &'static str> {
     let dns_header = DnsHeader::new(request_data);
     println!("Received {} bytes from {}", request_data.len(), source);
 
-    let dns_question = DNSQuestion::parse(&request_data[12..], original_data);
+    let dns_question = DNSQuestion::parse(&request_data[12..]);
     let resource_record = ResourceRecord::new();
 
     let mut response_header = dns_header.clone();
-    response_header.qdcount = 1;
-    response_header.ancount = 1;
+    response_header.qdcount = 1; // Updated QDCOUNT for the question section
+    response_header.ancount = 1; // Updated ANCOUNT for the answer section
 
     let mut response = response_header.to_bytes();
     response.extend_from_slice(&dns_question.to_bytes());
