@@ -70,32 +70,22 @@ struct DNSQuestion {
 }
 
 impl DNSQuestion {
-    fn parse(data: &[u8], original_data: &[u8]) -> DNSQuestion {
+    fn parse(data: &[u8]) -> DNSQuestion {
         let mut domain_name = String::new();
         let mut index = 0;
 
+        // Parse domain name
         loop {
             let label_len = data[index] as usize;
-
             if label_len == 0 {
                 break;
-            } else if (label_len & 0b1100_0000) == 0b1100_0000 {
-                // Check if the label is compressed
-                let offset = ((label_len & !0b1100_0000) as u16) << 8 | data[index + 1] as u16;
-                let compressed_data = &original_data[offset as usize..];
-                domain_name
-                    .push_str(&DNSQuestion::parse(compressed_data, original_data).domain_name);
-                break;
-            } else {
-                // Not compressed, read the label normally
-                if index > 0 {
-                    domain_name.push('.');
-                }
-                domain_name.push_str(
-                    std::str::from_utf8(&data[index + 1..index + 1 + label_len]).unwrap(),
-                );
-                index += 1 + label_len;
             }
+            if index > 0 {
+                domain_name.push('.');
+            }
+            domain_name
+                .push_str(std::str::from_utf8(&data[index + 1..index + 1 + label_len]).unwrap());
+            index += 1 + label_len;
         }
 
         // Skip null terminator
