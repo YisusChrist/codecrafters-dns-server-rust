@@ -198,7 +198,7 @@ fn main() {
 
     loop {
         match udp_socket.recv_from(&mut buf) {
-            Ok((size, source)) => match handle_dns_request(&buf[..size], &buf, &source) {
+            Ok((size, source)) => match handle_dns_request(&buf[..size], &source) {
                 Ok(response) => {
                     udp_socket
                         .send_to(&response, source)
@@ -216,7 +216,6 @@ fn main() {
 
 fn handle_dns_request(
     request_data: &[u8],
-    original_data: &[u8],
     source: &std::net::SocketAddr,
 ) -> Result<Vec<u8>, &'static str> {
     let dns_header = DnsHeader::new(request_data);
@@ -227,7 +226,7 @@ fn handle_dns_request(
 
     // Parse questions
     for _ in 0..dns_header.qdcount {
-        let question = DNSQuestion::parse(&request_data[index..], &original_data);
+        let question = DNSQuestion::parse(&request_data[index..], &request_data);
         index += DNSQuestion::calculate_size(&request_data[index..]);
         questions.push(question);
     }
