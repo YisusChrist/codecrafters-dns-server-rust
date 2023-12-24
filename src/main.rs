@@ -161,7 +161,7 @@ fn main() {
 
     loop {
         match udp_socket.recv_from(&mut buf) {
-            Ok((size, source)) => match handle_dns_request(&buf[..size], &buf, &source) {
+            Ok((size, source)) => match handle_dns_request(&buf[..size], &source) {
                 Ok(response) => {
                     udp_socket
                         .send_to(&response, source)
@@ -179,13 +179,12 @@ fn main() {
 
 fn handle_dns_request(
     request_data: &[u8],
-    original_data: &[u8],
     source: &std::net::SocketAddr,
 ) -> Result<Vec<u8>, &'static str> {
     let dns_header = DnsHeader::new(request_data);
     println!("Received {} bytes from {}", request_data.len(), source);
 
-    let dns_question = DNSQuestion::parse(&request_data[12..], original_data);
+    let dns_question = DNSQuestion::parse(&request_data[12..]);
     let compressed_domain_name = parse_compressed_sequence(&request_data[12..]);
     let resource_record = ResourceRecord::new(compressed_domain_name.clone());
 
