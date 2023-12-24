@@ -24,7 +24,7 @@ struct DnsHeader {
 }
 
 impl DnsHeader {
-    fn new(data: &[u8]) -> DnsHeader {
+    fn new(data: &[u8], num_answers: u16) -> DnsHeader {
         let mut id = [0u8; 2];
         id.copy_from_slice(&data[..2]);
 
@@ -44,7 +44,7 @@ impl DnsHeader {
             z: 0,
             rcode,
             qdcount: 1, // Updated QDCOUNT for the question section
-            ancount: 1, // Updated ANCOUNT for the answer section
+            ancount: num_answers,
             nscount: 0,
             arcount: 0,
         }
@@ -205,7 +205,7 @@ fn handle_dns_request(
     original_data: &[u8],
     source: &std::net::SocketAddr,
 ) -> Result<Vec<u8>, &'static str> {
-    let dns_header = DnsHeader::new(request_data);
+    let dns_header = DnsHeader::new(request_data, 2);
     println!("Received {} bytes from {}", request_data.len(), source);
 
     let dns_question = DNSQuestion::parse(&request_data[12..], original_data);
