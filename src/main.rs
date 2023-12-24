@@ -123,6 +123,33 @@ impl DNSQuestion {
         bytes.extend_from_slice(&self.query_class.to_be_bytes());
         bytes
     }
+
+    fn calculate_size(data: &[u8]) -> usize {
+        let mut index = 0;
+
+        loop {
+            let label_len = data[index] as usize;
+
+            if label_len == 0 {
+                break;
+            } else if (label_len & 0b1100_0000) == 0b1100_0000 {
+                // Compressed label
+                index += 2;
+                break;
+            } else {
+                // Uncompressed label
+                index += 1 + label_len;
+            }
+        }
+
+        // Skip null terminator
+        index += 1;
+
+        // Skip query type and class
+        index += 4;
+
+        index
+    }
 }
 
 struct ResourceRecord {
@@ -195,16 +222,33 @@ fn handle_dns_request(
     let dns_header = DnsHeader::new(request_data);
     println!("Received {} bytes from {}", request_data.len(), source);
 
-    let dns_question = DNSQuestion::parse(&request_data[12..], original_data);
-    let resource_record = ResourceRecord::new(dns_question.domain_name.clone());
+    let mut index = 12; // Skip DNS header
+    let mut questions = Vec::new();
 
+    // Parse questions
+    for _ in 0..dns_header.qdcount {
+        let question = DNSQuestion::parse(&request_data[index..], &original_data);
+        index += DNSQuestion::calculate_size(&request_data[index..]);
+        questions.push(question);
+    }
+
+    // Prepare response header
     let mut response_header = dns_header.clone();
-    response_header.qdcount = 1;
-    response_header.ancount = 1;
+    response_header.qdcount = dns_header.qdcount;
+    response_header.ancount = dns_header.qdcount; // Respond with the same number of answers as questions
 
     let mut response = response_header.to_bytes();
-    response.extend_from_slice(&dns_question.to_bytes());
-    response.extend_from_slice(&resource_record.to_bytes());
+
+    // Append questions to response
+    for question in &questions {
+        response.extend_from_slice(&question.to_bytes());
+    }
+
+    // Append answers to response
+    for question in &questions {
+        let resource_record = ResourceRecord::new(question.domain_name.clone());
+        response.extend_from_slice(&resource_record.to_bytes());
+    }
 
     Ok(response)
 }
