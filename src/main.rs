@@ -70,45 +70,51 @@ struct DNSQuestion {
 }
 
 impl DNSQuestion {
-    fn parse(data: &[u8], original_data: &[u8]) -> DNSQuestion {
+    fn parse(data: &[u8]) -> DNSQuestion {
         let mut domain_name = String::new();
-        let mut index = 0;
+        let mut offset = 0;
+        let mut position_stack = Vec::new();
 
-        loop {
-            let label_len = data[index] as usize;
+        while offset < data.len() {
+            let byte = data[offset];
+            offset += 1;
 
-            if label_len == 0 {
-                break;
-            } else if (label_len & 0b1100_0000) == 0b1100_0000 {
-                // Check if the label is compressed
-                let offset = ((label_len & !0b1100_0000) as u16) << 8 | data[index + 1] as u16;
-                let compressed_data = &original_data[offset as usize..];
-                domain_name
-                    .push_str(&DNSQuestion::parse(compressed_data, original_data).domain_name);
-                break;
-            } else {
-                // Not compressed, read the label normally
-                if index > 0 {
-                    domain_name.push('.');
+            if (byte >> 6) == 0b00 {
+                // Label is not compressed
+                let label_len = byte as usize;
+
+                if offset + label_len > data.len() {
+                    panic!("Invalid compressed DNS question: label length exceeds data length");
                 }
-                domain_name.push_str(
-                    std::str::from_utf8(&data[index + 1..index + 1 + label_len]).unwrap(),
-                );
-                index += 1 + label_len;
+
+                domain_name
+                    .push_str(std::str::from_utf8(&data[offset..offset + label_len]).unwrap());
+                offset += label_len;
+            } else {
+                // Label is compressed
+                let pointer_offset = (byte & 0x7F) as usize;
+
+                if offset + 1 + pointer_offset > data.len() {
+                    panic!("Invalid compressed DNS question: pointer offset exceeds data length");
+                }
+
+                position_stack.push(offset);
+                offset += 1;
+                offset += pointer_offset;
+            }
+
+            if data[offset] == 0 {
+                // Empty label signifies end of domain name
+                if let Some(position) = position_stack.pop() {
+                    offset = position;
+                }
             }
         }
 
-        // Skip null terminator
-        index += 1;
-
-        // Parse query type and class
-        let query_type = BigEndian::read_u16(&data[index..index + 2]);
-        let query_class = BigEndian::read_u16(&data[index + 2..index + 4]);
-
         DNSQuestion {
             domain_name,
-            query_type,
-            query_class,
+            query_type: BigEndian::read_u16(&data[offset + 2..offset + 4]),
+            query_class: BigEndian::read_u16(&data[offset + 4..offset + 6]),
         }
     }
 
@@ -122,33 +128,6 @@ impl DNSQuestion {
         bytes.extend_from_slice(&self.query_type.to_be_bytes());
         bytes.extend_from_slice(&self.query_class.to_be_bytes());
         bytes
-    }
-
-    fn calculate_size(data: &[u8]) -> usize {
-        let mut index = 0;
-
-        loop {
-            let label_len = data[index] as usize;
-
-            if label_len == 0 {
-                break;
-            } else if (label_len & 0b1100_0000) == 0b1100_0000 {
-                // Compressed label
-                index += 2;
-                break;
-            } else {
-                // Uncompressed label
-                index += 1 + label_len;
-            }
-        }
-
-        // Skip null terminator
-        index += 1;
-
-        // Skip query type and class
-        index += 4;
-
-        index
     }
 }
 
@@ -221,33 +200,16 @@ fn handle_dns_request(
     let dns_header = DnsHeader::new(request_data);
     println!("Received {} bytes from {}", request_data.len(), source);
 
-    let mut index = 12; // Skip DNS header
-    let mut questions = Vec::new();
+    let dns_question = DNSQuestion::parse(&request_data[12..]);
+    let resource_record = ResourceRecord::new(dns_question.domain_name.clone());
 
-    // Parse questions
-    for _ in 0..dns_header.qdcount {
-        let question = DNSQuestion::parse(&request_data[index..], &request_data);
-        index += DNSQuestion::calculate_size(&request_data[index..]);
-        questions.push(question);
-    }
-
-    // Prepare response header
     let mut response_header = dns_header.clone();
-    response_header.qdcount = dns_header.qdcount;
-    response_header.ancount = dns_header.qdcount; // Respond with the same number of answers as questions
+    response_header.qdcount = 1;
+    response_header.ancount = 1;
 
     let mut response = response_header.to_bytes();
-
-    // Append questions to response
-    for question in &questions {
-        response.extend_from_slice(&question.to_bytes());
-    }
-
-    // Append answers to response
-    for question in &questions {
-        let resource_record = ResourceRecord::new(question.domain_name.clone());
-        response.extend_from_slice(&resource_record.to_bytes());
-    }
+    response.extend_from_slice(&dns_question.to_bytes());
+    response.extend_from_slice(&resource_record.to_bytes());
 
     Ok(response)
 }
