@@ -24,7 +24,7 @@ struct DnsHeader {
 }
 
 impl DnsHeader {
-    fn new(data: &[u8], num_answers: u16) -> DnsHeader {
+    fn new(data: &[u8]) -> DnsHeader {
         let mut id = [0u8; 2];
         id.copy_from_slice(&data[..2]);
 
@@ -44,7 +44,7 @@ impl DnsHeader {
             z: 0,
             rcode,
             qdcount: 1, // Updated QDCOUNT for the question section
-            ancount: num_answers,
+            ancount: 1, // Updated ANCOUNT for the answer section
             nscount: 0,
             arcount: 0,
         }
@@ -73,15 +73,20 @@ impl DNSQuestion {
     fn parse(data: &[u8], original_data: &[u8]) -> DNSQuestion {
         let mut domain_name = String::new();
         let mut index = 0;
+        let mut pointers_stack: Vec<usize> = Vec::new();
 
         loop {
             let label_len = data[index] as usize;
 
             if label_len == 0 {
-                break;
-            }
-
-            if label_len & 0xC0 == 0xC0 {
+                if let Some(position) = pointers_stack.pop() {
+                    // Pop a position from the stack and jump back to that position
+                    index = position;
+                } else {
+                    // End of label sequence
+                    break;
+                }
+            } else if label_len & 0xC0 == 0xC0 {
                 // Compressed label
                 let offset_bytes = BigEndian::read_u16(&data[index..index + 2]);
                 let offset = offset_bytes & 0x3FFF; // Masking the top two bits
@@ -91,15 +96,14 @@ impl DNSQuestion {
                     break;
                 }
 
-                // Recursively parse the compressed name starting from the offset
-                let compressed_data = &original_data[offset as usize..];
-                let compressed_question = DNSQuestion::parse(compressed_data, original_data);
+                // Push the current position onto the stack
+                pointers_stack.push(index + 2);
 
-                domain_name.push_str(&compressed_question.domain_name);
-                break;
+                // Jump to the compressed name starting from the offset
+                index = offset as usize;
             } else {
                 // Uncompressed label
-                if index > 0 {
+                if index > 0 && !domain_name.is_empty() {
                     domain_name.push('.');
                 }
 
@@ -110,9 +114,6 @@ impl DNSQuestion {
                 index += 1 + label_len;
             }
         }
-
-        // Skip null terminator
-        index += 1;
 
         // Parse query type and class
         let query_type = BigEndian::read_u16(&data[index..index + 2]);
@@ -205,7 +206,7 @@ fn handle_dns_request(
     original_data: &[u8],
     source: &std::net::SocketAddr,
 ) -> Result<Vec<u8>, &'static str> {
-    let dns_header = DnsHeader::new(request_data, 2);
+    let dns_header = DnsHeader::new(request_data);
     println!("Received {} bytes from {}", request_data.len(), source);
 
     let dns_question = DNSQuestion::parse(&request_data[12..], original_data);
