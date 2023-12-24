@@ -70,36 +70,30 @@ struct DNSQuestion {
 }
 
 impl DNSQuestion {
-    fn parse(data: &[u8]) -> DNSQuestion {
-        let mut domain_name = String::new();
+    fn parse(data: &[u8]) -> (Vec<DNSQuestion>, usize) {
+        let mut questions = Vec::new();
         let mut index = 0;
 
-        // Parse domain name
-        loop {
-            let label_len = data[index] as usize;
-            if label_len == 0 {
+        while index < data.len() {
+            let (domain_name, new_index) = parse_domain_name(&data[index..]);
+            index = new_index;
+
+            let query_type = BigEndian::read_u16(&data[index..index + 2]);
+            let query_class = BigEndian::read_u16(&data[index + 2..index + 4]);
+            index += 4;
+
+            questions.push(DNSQuestion {
+                domain_name,
+                query_type,
+                query_class,
+            });
+
+            if data[index] == 0 {
                 break;
             }
-            if index > 0 {
-                domain_name.push('.');
-            }
-            domain_name
-                .push_str(std::str::from_utf8(&data[index + 1..index + 1 + label_len]).unwrap());
-            index += 1 + label_len;
         }
 
-        // Skip null terminator
-        index += 1;
-
-        // Parse query type and class
-        let query_type = BigEndian::read_u16(&data[index..index + 2]);
-        let query_class = BigEndian::read_u16(&data[index + 2..index + 4]);
-
-        DNSQuestion {
-            domain_name,
-            query_type,
-            query_class,
-        }
+        (questions, index)
     }
 
     fn to_bytes(&self) -> Vec<u8> {
@@ -184,55 +178,51 @@ fn handle_dns_request(
     let dns_header = DnsHeader::new(request_data);
     println!("Received {} bytes from {}", request_data.len(), source);
 
-    let dns_question = DNSQuestion::parse(&request_data[12..]);
-    let compressed_domain_name = parse_compressed_sequence(&request_data[12..]);
-    let resource_record = ResourceRecord::new(compressed_domain_name.clone());
-
+    let (dns_questions, index) = DNSQuestion::parse(&request_data[12..]);
     let mut response_header = dns_header.clone();
-    response_header.qdcount = 1;
-    response_header.ancount = 1;
+    response_header.qdcount = dns_questions.len() as u16;
+    response_header.ancount = dns_questions.len() as u16;
 
     let mut response = response_header.to_bytes();
-    response.extend_from_slice(&dns_question.to_bytes());
-    response.extend_from_slice(&resource_record.to_bytes());
+
+    for question in dns_questions {
+        response.extend_from_slice(&question.to_bytes());
+        let resource_record = ResourceRecord::new(question.domain_name.clone());
+        response.extend_from_slice(&resource_record.to_bytes());
+    }
 
     Ok(response)
 }
 
-fn parse_compressed_sequence(data: &[u8]) -> String {
+fn parse_domain_name(data: &[u8]) -> (String, usize) {
     let mut domain_name = String::new();
     let mut index = 0;
     let mut stack = Vec::new();
 
     loop {
-        let label_len = data[index] as usize;
-        if label_len == 0 {
-            break;
-        }
-
-        if index > 0 {
-            domain_name.push('.');
-        }
-
-        if label_len >= 192 {
-            let pointer = BigEndian::read_u16(&data[index..index + 2]);
+        let len = data[index];
+        if len & 0xC0 == 0xC0 {
+            // This is a pointer
+            let pointer = ((len as u16) & 0x3F) << 8 | data[index + 1] as u16;
             stack.push(index + 2);
             index = pointer as usize;
-        } else {
+        } else if len > 0 {
+            // This is a label
+            if !domain_name.is_empty() {
+                domain_name.push('.');
+            }
             domain_name
-                .push_str(&std::str::from_utf8(&data[index + 1..index + 1 + label_len]).unwrap());
-            index += 1 + label_len;
+                .push_str(std::str::from_utf8(&data[index + 1..index + 1 + len as usize]).unwrap());
+            index += 1 + len as usize;
+        } else {
+            // End of a label sequence
+            if let Some(pos) = stack.pop() {
+                index = pos;
+            } else {
+                break;
+            }
         }
     }
 
-    if index > 0 {
-        domain_name.push('.');
-    }
-
-    while !stack.is_empty() {
-        let popped_index = stack.pop().unwrap();
-        domain_name.push_str(&parse_compressed_sequence(&data[popped_index..]).as_str());
-    }
-
-    domain_name
+    (domain_name, index + 1)
 }
