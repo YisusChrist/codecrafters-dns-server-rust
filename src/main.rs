@@ -70,50 +70,26 @@ struct DNSQuestion {
 }
 
 impl DNSQuestion {
-    fn parse(data: &[u8], original_data: &[u8]) -> DNSQuestion {
+    fn parse(data: &[u8]) -> DNSQuestion {
         let mut domain_name = String::new();
         let mut index = 0;
-        let mut pointers_stack: Vec<usize> = Vec::new();
 
+        // Parse domain name
         loop {
             let label_len = data[index] as usize;
-
             if label_len == 0 {
-                if let Some(position) = pointers_stack.pop() {
-                    // Pop a position from the stack and jump back to that position
-                    index = position;
-                } else {
-                    // End of label sequence
-                    break;
-                }
-            } else if label_len & 0xC0 == 0xC0 {
-                // Compressed label
-                let offset_bytes = BigEndian::read_u16(&data[index..index + 2]);
-                let offset = offset_bytes & 0x3FFF; // Masking the top two bits
-
-                if offset >= original_data.len() as u16 {
-                    // Invalid offset, break to avoid potential infinite loop
-                    break;
-                }
-
-                // Push the current position onto the stack
-                pointers_stack.push(index + 2);
-
-                // Jump to the compressed name starting from the offset
-                index = offset as usize;
-            } else {
-                // Uncompressed label
-                if index > 0 && !domain_name.is_empty() {
-                    domain_name.push('.');
-                }
-
-                domain_name.push_str(
-                    std::str::from_utf8(&data[index + 1..index + 1 + label_len])
-                        .unwrap_or_default(),
-                );
-                index += 1 + label_len;
+                break;
             }
+            if index > 0 {
+                domain_name.push('.');
+            }
+            domain_name
+                .push_str(std::str::from_utf8(&data[index + 1..index + 1 + label_len]).unwrap());
+            index += 1 + label_len;
         }
+
+        // Skip null terminator
+        index += 1;
 
         // Parse query type and class
         let query_type = BigEndian::read_u16(&data[index..index + 2]);
@@ -185,7 +161,7 @@ fn main() {
 
     loop {
         match udp_socket.recv_from(&mut buf) {
-            Ok((size, source)) => match handle_dns_request(&buf[..size], &buf, &source) {
+            Ok((size, source)) => match handle_dns_request(&buf[..size], &source) {
                 Ok(response) => {
                     udp_socket
                         .send_to(&response, source)
@@ -203,13 +179,13 @@ fn main() {
 
 fn handle_dns_request(
     request_data: &[u8],
-    original_data: &[u8],
+    //original_data: &[u8],
     source: &std::net::SocketAddr,
 ) -> Result<Vec<u8>, &'static str> {
     let dns_header = DnsHeader::new(request_data);
     println!("Received {} bytes from {}", request_data.len(), source);
 
-    let dns_question = DNSQuestion::parse(&request_data[12..], original_data);
+    let dns_question = DNSQuestion::parse(&request_data[12..]);
     let resource_record = ResourceRecord::new(dns_question.domain_name.clone());
 
     let mut response_header = dns_header.clone();
