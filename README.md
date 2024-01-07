@@ -38,6 +38,8 @@ various record types (A, AAAA, CNAME, etc) and more.
       - [The Answer Section](#the-answer-section)
   - [Stage 7: Parse compressed packet](#stage-7-parse-compressed-packet)
     - [Rust Guide (Beta)](#rust-guide-beta-5)
+  - [Stage 8: Forwarding Server](#stage-8-forwarding-server)
+    - [Rust Guide (Beta)](#rust-guide-beta-6)
 
 # Introduction
 
@@ -340,8 +342,8 @@ It'll then send a UDP packet (containing a DNS query) to port 2053.
 
 Your program will need to respond with a DNS reply packet that contains:
 
-- a header section (same as in stage #2)
-- a question section (same as in stage #3)
+- a header section (same as in [stage \#2](#stage-2-write-header-section))
+- a question section (same as in [stage \#3](#stage-3-write-question-section))
 - an answer section (**new in this stage!**)
   Your answer section should contain a single RR, with the following values:
 
@@ -503,11 +505,11 @@ Just like the previous stage, the tester will execute your program like this:
 
 It'll then send a UDP packet (containing a DNS query) to port 2053 that contains a question section as follows:
 
-| **Field** | **Value sent by the tester**                                                    |
-| --------- | ------------------------------------------------------------------------------- |
-| Name      | A random domain encoded as a label sequence (refer to stage \#3 for details)    |
-| Type      | `1` encoded as a 2-byte big-endian int (corresponding to the "A" record type)   |
-| Class     | `1` encoded as a 2-byte big-endian int (corresponding to the "IN" record class) |
+| **Field** | **Value sent by the tester**                                                                                    |
+| --------- | --------------------------------------------------------------------------------------------------------------- |
+| Name      | A random domain encoded as a label sequence (refer to [stage \#3](#stage-3-write-question-section) for details) |
+| Type      | `1` encoded as a 2-byte big-endian int (corresponding to the "A" record type)                                   |
+| Class     | `1` encoded as a 2-byte big-endian int (corresponding to the "IN" record class)                                 |
 
 The question type will always be `A` for this stage and the question class will always be `IN`. So your parser only needs to account for those record types for now.
 
@@ -604,3 +606,60 @@ As a tip, consider Rust's byteorder crate (rust-byteorder) which provides utilit
 As for the response, you won't need to worry about compressing - you can respond with full domain names.
 
 Remember, don't hesitate to look into "Code Examples" if you need extra help in understanding these concepts. That's what they are there for!
+
+## Stage 8: Forwarding Server
+
+In this stage, you will implement a forwarding DNS server.
+
+A forwarding DNS server, also known as a DNS forwarder, is a DNS server that is configured to pass DNS queries it receives from clients to another DNS server for resolution. Instead of directly resolving DNS queries by looking up the information in its own local cache or authoritative records.
+
+---
+
+In this stage the tester will execute your program like this:
+
+```
+./your_server --resolver <address>
+
+```
+
+- where `<address>` will be of the form `<ip>:<port>`
+
+It'll then send a UDP packet (containing a DNS query) to port 2053. Your program will be responsible for forwarding DNS queries to a specified DNS server, and then returning the response to the original requester (i.e. the tester).
+
+Your program will need to respond with a DNS reply packet that contains:
+
+- a header section (same as in [stage \#5](#stage-5-parse-header-section))
+- a question section (same as in [stage \#6](#stage-6-parse-question-section))
+- an answer section (new in this stage) mimicking what you received from the DNS server to which you forwarded the request.
+
+Here are a few assumptions you can make about the tester:
+
+- It will always send you queries for `A` record type. So your parsing logic only needs to take care of this.
+
+Here are few assumptions you can make about the DNS server you are forwarding the requests to:
+
+- It will always respond with an answer section for the queries that originate from the tester.
+- It will not contain other sections like (authority section and additional section)
+- It will only respond when there is only one question in the question section. If you send multiple questions in the question section, it will not respond at all. So when you receive multiple questions in the question section you will need to split it into two DNS packets and then send them to this resolver then merge the response in a single packet.
+
+Remember to mimic the packet identifier value sent by the tester in your response.
+
+---
+
+### Rust Guide (Beta)
+
+In this stage, you will implement a DNS forwarding server in Rust. To make this easier, I suggest breaking this into four main tasks:
+
+1. **Split multiple DNS queries into separate packets**: You will need to create logic to identify when there is more than one DNS query in the incoming packet. You could leverage a separate function to handle this, splitting the queries and returning them as distinct DNS query packets. The [`Vec<T>`](https://doc.rust-lang.org/std/vec/struct.Vec.html) structure can be useful here to create a dynamic collection of query packets.
+
+2. **Send DNS queries to specified DNS server**: You need to forward DNS queries to the DNS server specified by the tester. You can use the [`std::net::UdpSocket`](https://doc.rust-lang.org/std/net/struct.UdpSocket.html) library for this purpose. Use [`UdpSocket::bind()`](https://doc.rust-lang.org/std/net/struct.UdpSocket.html#method.bind) to create a socket, then [`UdpSocket::send_to()`](https://doc.rust-lang.org/std/net/struct.UdpSocket.html#method.send_to) to send your query packets to the targeted server. Be noting the `<ip>:<port>` format when dealing with socket addresses.
+
+3. **Receive and process reply from DNS server**: After sending the queries, you'll listen for responses using [`UdpSocket::recv_from()`](https://doc.rust-lang.org/std/net/struct.UdpSocket.html#method.recv_from). Once received, you may want to parse the response into a data structure for easier manipulation.
+
+4. **Respond to original request with DNS reply packet**: Once you have your processed responses, you'll need to format them into the proper response structure and send it back to the tester using [`UdpSocket::send_to()`](https://doc.rust-lang.org/std/net/struct.UdpSocket.html#method.send_to) again.
+
+Rust tip: Rust's [`Result`](https://doc.rust-lang.org/std/result/enum.Result.html) enum is useful here, as each of these methods can return a Result type. Make sure to incorporate error handling into your code by using Result's [`Ok`](https://doc.rust-lang.org/std/result/enum.Result.html#variant.Ok) and [`Err`](https://doc.rust-lang.org/std/result/enum.Result.html#variant.Err) variants.
+
+Also, remember to manipulate the packet identifiers to mimic the ones sent by the tester. You can use byte order conversion methods, since network packets are sent in big-endian format, whereas your local machine may read in little-endian.
+
+This stage is definitely tricky, but I am confident with your current foundational knowledge, you can tackle this. If you need more help with Rust-syntax or approach, don't hesitate to refer to the "Code Examples" section on your platform. Keep going!
