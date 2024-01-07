@@ -617,9 +617,8 @@ A forwarding DNS server, also known as a DNS forwarder, is a DNS server that is 
 
 In this stage the tester will execute your program like this:
 
-```
+```sh
 ./your_server --resolver <address>
-
 ```
 
 - where `<address>` will be of the form `<ip>:<port>`
